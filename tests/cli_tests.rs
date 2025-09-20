@@ -175,8 +175,9 @@ fn test_edit_todo_title() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Updated:"));
-    assert!(stdout.contains("Updated title"));
+    assert!(stdout.contains("Updated task [1]"));
+    assert!(stdout.contains("Changes:"));
+    assert!(stdout.contains("Title: Original title → Updated title"));
 }
 
 #[test]
@@ -200,8 +201,13 @@ fn test_edit_todo_all_fields() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Updated:"));
-    assert!(stdout.contains("Edited task"));
+    assert!(stdout.contains("Updated task [1]"));
+    assert!(stdout.contains("Changes:"));
+    assert!(stdout.contains("Title: Task to edit → Edited task"));
+    assert!(stdout.contains("Description: (none) → New description"));
+    assert!(stdout.contains("Due date: (none) → 2024-12-25"));
+    assert!(stdout.contains("Category: (none) → personal"));
+    assert!(stdout.contains("Priority: medium → low"));
 }
 
 #[test]
@@ -409,7 +415,10 @@ fn test_edit_clear_fields() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Updated:"));
+    assert!(stdout.contains("Updated task [1]"));
+    assert!(stdout.contains("Changes:"));
+    assert!(stdout.contains("Description: Original description → (none)"));
+    assert!(stdout.contains("Category: work → (none)"));
 }
 
 #[test]
@@ -432,7 +441,9 @@ fn test_mark_incomplete() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Updated:"));
+    assert!(stdout.contains("Updated task [1]"));
+    assert!(stdout.contains("Changes:"));
+    assert!(stdout.contains("Status: completed → incomplete"));
 }
 
 #[test]
