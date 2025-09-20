@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::*;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 mod models;
@@ -81,12 +82,23 @@ enum Commands {
     /// Mark a todo item as completed
     Complete {
         /// The ID of the todo item to complete
+        id: Option<u32>,
+        /// Complete all pending tasks
+        #[arg(long, conflicts_with = "id")]
+        all: bool,
+    },
+    /// Mark a todo item as incomplete
+    Incomplete {
+        /// The ID of the todo item to mark as incomplete
         id: u32,
     },
     /// Remove a todo item
     Remove {
         /// The ID of the todo item to remove
         id: u32,
+        /// Confirm destructive operation
+        #[arg(long)]
+        confirm: bool,
     },
     /// Edit an existing todo item
     Edit {
@@ -117,6 +129,16 @@ fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
     let naive_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")?;
     let naive_datetime = naive_date.and_hms_opt(23, 59, 59).unwrap();
     Ok(Local.from_local_datetime(&naive_datetime).unwrap())
+}
+
+fn confirm_action(message: &str) -> bool {
+    print!("{} (y/N): ", message);
+    io::stdout().flush().unwrap();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+
+    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
 fn load_todo_list(config_file: Option<PathBuf>) -> Result<TodoList> {
@@ -237,11 +259,58 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        Some(Commands::Complete { id }) => {
-            match todo_list.mark_complete(id) {
+        Some(Commands::Complete { id, all }) => {
+            if all {
+                let pending_tasks = todo_list.get_pending_tasks();
+                if pending_tasks.is_empty() {
+                    println!("{}", "No pending tasks to complete.".dimmed());
+                    return Ok(());
+                }
+
+                let count = pending_tasks.len();
+                println!("Found {} pending task(s):", count);
+                for task in &pending_tasks {
+                    println!("  - [{}] {}", task.id, task.title);
+                }
+
+                if confirm_action(&format!("Complete all {} task(s)?", count)) {
+                    let task_ids: Vec<u32> = pending_tasks.iter().map(|task| task.id).collect();
+                    let mut completed_count = 0;
+                    for task_id in task_ids {
+                        if todo_list.mark_complete(task_id).is_ok() {
+                            completed_count += 1;
+                        }
+                    }
+                    println!("{} {} task(s)", "Completed:".green().bold(), completed_count);
+                    save_todo_list(&todo_list, cli.config_file)
+                } else {
+                    println!("Operation cancelled.");
+                    Ok(())
+                }
+            } else if let Some(task_id) = id {
+                match todo_list.mark_complete(task_id) {
+                    Ok(_) => {
+                        if let Some(task) = todo_list.get_task(task_id) {
+                            println!("{} {}", "Completed:".green().bold(), task.title);
+                        }
+                        save_todo_list(&todo_list, cli.config_file)
+                    }
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red().bold(), e);
+                        Ok(())
+                    }
+                }
+            } else {
+                eprintln!("{}: Must specify either a task ID or use --all flag", "Error".red().bold());
+                Ok(())
+            }
+        }
+
+        Some(Commands::Incomplete { id }) => {
+            match todo_list.mark_incomplete(id) {
                 Ok(_) => {
                     if let Some(task) = todo_list.get_task(id) {
-                        println!("{} {}", "Completed:".green().bold(), task.title);
+                        println!("{} {}", "Marked as incomplete:".yellow().bold(), task.title);
                     }
                     save_todo_list(&todo_list, cli.config_file)
                 }
@@ -252,16 +321,32 @@ fn main() -> Result<()> {
             }
         }
 
-        Some(Commands::Remove { id }) => {
-            match todo_list.remove_task(id) {
-                Some(task) => {
-                    println!("{} {}", "Removed:".red().bold(), task.title);
-                    save_todo_list(&todo_list, cli.config_file)
-                }
-                None => {
-                    eprintln!("{}: Task with ID {} not found", "Error".red().bold(), id);
+        Some(Commands::Remove { id, confirm }) => {
+            if let Some(task) = todo_list.get_task(id) {
+                let should_remove = if confirm {
+                    true
+                } else {
+                    confirm_action(&format!("Are you sure you want to remove task [{}] '{}'?", id, task.title))
+                };
+
+                if should_remove {
+                    match todo_list.remove_task(id) {
+                        Some(task) => {
+                            println!("{} {}", "Removed:".red().bold(), task.title);
+                            save_todo_list(&todo_list, cli.config_file)
+                        }
+                        None => {
+                            eprintln!("{}: Task with ID {} not found", "Error".red().bold(), id);
+                            Ok(())
+                        }
+                    }
+                } else {
+                    println!("Remove operation cancelled.");
                     Ok(())
                 }
+            } else {
+                eprintln!("{}: Task with ID {} not found", "Error".red().bold(), id);
+                Ok(())
             }
         }
 
