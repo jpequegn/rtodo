@@ -588,8 +588,8 @@ mod tests {
     #[test]
     fn test_task_update_builder_with_none_values() {
         let update = TaskUpdate::new()
-            .description(None)
-            .category(None)
+            .description(None::<String>)
+            .category(None::<String>)
             .due_date(None);
 
         assert_eq!(update.description, Some(None));
@@ -705,8 +705,8 @@ mod tests {
         );
 
         let update = TaskUpdate::new()
-            .description(None)
-            .category(None);
+            .description(None::<String>)
+            .category(None::<String>);
 
         let result = todo_list.update_task(id, update);
         assert!(result.is_ok());

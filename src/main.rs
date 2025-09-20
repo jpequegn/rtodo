@@ -72,7 +72,7 @@ enum Commands {
         #[arg(short = 'C', long)]
         category: Option<String>,
         /// Filter by priority
-        #[arg(short, long, value_enum)]
+        #[arg(short = 'P', long, value_enum)]
         priority: Option<PriorityArg>,
         /// Show overdue tasks only
         #[arg(short, long)]
