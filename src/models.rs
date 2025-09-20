@@ -132,6 +132,17 @@ impl Task {
             false
         }
     }
+
+    /// Check if the task is due soon (within a week)
+    pub fn is_due_soon(&self) -> bool {
+        if let Some(due_date) = self.due_date {
+            let now = Local::now();
+            let one_week_from_now = now + chrono::Duration::weeks(1);
+            !self.completed && now <= due_date && due_date <= one_week_from_now
+        } else {
+            false
+        }
+    }
 }
 
 /// Collection of tasks with management operations
@@ -286,6 +297,11 @@ impl TodoList {
     /// Get overdue tasks
     pub fn get_overdue_tasks(&self) -> Vec<&Task> {
         self.tasks.iter().filter(|task| task.is_overdue()).collect()
+    }
+
+    /// Get tasks due soon (within a week)
+    pub fn get_due_soon_tasks(&self) -> Vec<&Task> {
+        self.tasks.iter().filter(|task| task.is_due_soon()).collect()
     }
 
     /// Get the total number of tasks

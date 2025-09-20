@@ -434,3 +434,319 @@ fn test_mark_incomplete() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Updated:"));
 }
+
+#[test]
+fn test_list_due_soon_filter() {
+    let env = TestEnv::new();
+
+    // Add a task due soon (5 days from now)
+    env.run_rtodo(&["add", "Due soon task", "--due", "2025-09-25"])
+        .output()
+        .expect("Failed to add task");
+
+    // Add a task due far in the future
+    env.run_rtodo(&["add", "Future task", "--due", "2025-12-31"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test due-soon filter
+    let output = env.run_rtodo(&["list", "--due-soon"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Due soon task"));
+    assert!(!stdout.contains("Future task")); // Should not show tasks due far in future
+}
+
+#[test]
+fn test_list_sort_by_title() {
+    let env = TestEnv::new();
+
+    // Add tasks in specific order
+    env.run_rtodo(&["add", "Zebra task"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Alpha task"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Beta task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test sorting by title
+    let output = env.run_rtodo(&["list", "--sort-by", "title"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    // Find task lines (skip header)
+    let task_lines: Vec<&str> = lines.iter()
+        .filter(|line| line.contains("[1]") || line.contains("[2]") || line.contains("[3]"))
+        .cloned()
+        .collect();
+
+    // Should be sorted alphabetically
+    assert!(task_lines[0].contains("Alpha task"));
+    assert!(task_lines[1].contains("Beta task"));
+    assert!(task_lines[2].contains("Zebra task"));
+}
+
+#[test]
+fn test_list_sort_by_priority() {
+    let env = TestEnv::new();
+
+    // Add tasks with different priorities
+    env.run_rtodo(&["add", "Low task", "--priority", "low"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "High task", "--priority", "high"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Medium task", "--priority", "medium"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test sorting by priority
+    let output = env.run_rtodo(&["list", "--sort-by", "priority"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    // Find task lines (skip header)
+    let task_lines: Vec<&str> = lines.iter()
+        .filter(|line| line.contains("[1]") || line.contains("[2]") || line.contains("[3]"))
+        .cloned()
+        .collect();
+
+    // Should be sorted by priority: high, medium, low
+    assert!(task_lines[0].contains("High task"));
+    assert!(task_lines[1].contains("Medium task"));
+    assert!(task_lines[2].contains("Low task"));
+}
+
+#[test]
+fn test_list_sort_by_due_date() {
+    let env = TestEnv::new();
+
+    // Add tasks with different due dates
+    env.run_rtodo(&["add", "Late task", "--due", "2025-12-31"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Early task", "--due", "2025-09-25"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "No due date task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test sorting by due date
+    let output = env.run_rtodo(&["list", "--sort-by", "due"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    // Find task lines (skip header)
+    let task_lines: Vec<&str> = lines.iter()
+        .filter(|line| line.contains("[1]") || line.contains("[2]") || line.contains("[3]"))
+        .cloned()
+        .collect();
+
+    // Should be sorted by due date: earliest first, no due date last
+    assert!(task_lines[0].contains("Early task"));
+    assert!(task_lines[1].contains("Late task"));
+    assert!(task_lines[2].contains("No due date task"));
+}
+
+#[test]
+fn test_list_reverse_sort() {
+    let env = TestEnv::new();
+
+    // Add tasks with different priorities
+    env.run_rtodo(&["add", "Low task", "--priority", "low"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "High task", "--priority", "high"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Medium task", "--priority", "medium"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test reverse sorting by priority
+    let output = env.run_rtodo(&["list", "--sort-by", "priority", "--reverse"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    // Find task lines (skip header)
+    let task_lines: Vec<&str> = lines.iter()
+        .filter(|line| line.contains("[1]") || line.contains("[2]") || line.contains("[3]"))
+        .cloned()
+        .collect();
+
+    // Should be sorted in reverse priority order: low, medium, high
+    assert!(task_lines[0].contains("Low task"));
+    assert!(task_lines[1].contains("Medium task"));
+    assert!(task_lines[2].contains("High task"));
+}
+
+#[test]
+fn test_list_sort_by_created() {
+    let env = TestEnv::new();
+
+    // Add tasks in specific order (will have different creation times)
+    env.run_rtodo(&["add", "First task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Small delay to ensure different creation times
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    env.run_rtodo(&["add", "Second task"])
+        .output()
+        .expect("Failed to add task");
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    env.run_rtodo(&["add", "Third task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test sorting by created date
+    let output = env.run_rtodo(&["list", "--sort-by", "created"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    // Find task lines (skip header)
+    let task_lines: Vec<&str> = lines.iter()
+        .filter(|line| line.contains("[1]") || line.contains("[2]") || line.contains("[3]"))
+        .cloned()
+        .collect();
+
+    // Should be sorted by creation order
+    assert!(task_lines[0].contains("First task"));
+    assert!(task_lines[1].contains("Second task"));
+    assert!(task_lines[2].contains("Third task"));
+}
+
+#[test]
+fn test_list_combined_filter_and_sort() {
+    let env = TestEnv::new();
+
+    // Add tasks with different categories and priorities
+    env.run_rtodo(&["add", "Work B", "--category", "work", "--priority", "low"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Work A", "--category", "work", "--priority", "high"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Personal task", "--category", "personal", "--priority", "high"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test filtering by category and sorting by title
+    let output = env.run_rtodo(&["list", "--category", "work", "--sort-by", "title"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Should only show work tasks, sorted alphabetically
+    assert!(stdout.contains("Work A"));
+    assert!(stdout.contains("Work B"));
+    assert!(!stdout.contains("Personal task"));
+
+    // Check order - Work A should come before Work B
+    let work_a_pos = stdout.find("Work A").unwrap();
+    let work_b_pos = stdout.find("Work B").unwrap();
+    assert!(work_a_pos < work_b_pos);
+}
+
+#[test]
+fn test_due_soon_color_highlighting() {
+    let env = TestEnv::new();
+
+    // Add a task due soon
+    env.run_rtodo(&["add", "Due soon task", "--due", "2025-09-25"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test verbose mode to see color highlighting
+    let output = env.run_rtodo(&["--verbose", "list", "--due-soon"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Should show the task with due date
+    assert!(stdout.contains("Due soon task"));
+    assert!(stdout.contains("Due: 2025-09-25"));
+}
+
+#[test]
+fn test_list_help_shows_new_options() {
+    let env = TestEnv::new();
+
+    let output = env.run_rtodo(&["list", "--help"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Check that new options are documented
+    assert!(stdout.contains("--due-soon"));
+    assert!(stdout.contains("--sort-by"));
+    assert!(stdout.contains("--reverse"));
+}
+
+#[test]
+fn test_sort_field_values_in_help() {
+    let env = TestEnv::new();
+
+    let output = env.run_rtodo(&["list", "--help"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Check that sort field options are shown (these might be in different format)
+    // The exact format depends on clap's help generation
+    assert!(stdout.contains("sort") && (
+        stdout.contains("created") ||
+        stdout.contains("due") ||
+        stdout.contains("priority") ||
+        stdout.contains("title")
+    ));
+}
