@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Priority levels for tasks
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,6 +296,88 @@ impl TodoList {
     /// Check if the todo list is empty
     pub fn is_empty(&self) -> bool {
         self.tasks.is_empty()
+    }
+
+    /// Get the default file path for storing tasks
+    pub fn default_file_path() -> Result<PathBuf> {
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow!("Unable to determine home directory"))?;
+
+        let todo_dir = home_dir.join(".todo-cli");
+        if !todo_dir.exists() {
+            fs::create_dir_all(&todo_dir)
+                .map_err(|e| anyhow!("Failed to create todo directory: {}", e))?;
+        }
+
+        Ok(todo_dir.join("tasks.json"))
+    }
+
+    /// Save the todo list to a file
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let path = path.as_ref();
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| anyhow!("Failed to create directory {}: {}", parent.display(), e))?;
+            }
+        }
+
+        // Create backup if file exists
+        if path.exists() {
+            let backup_path = path.with_extension("json.backup");
+            fs::copy(path, &backup_path)
+                .map_err(|e| anyhow!("Failed to create backup at {}: {}", backup_path.display(), e))?;
+        }
+
+        // Serialize to JSON
+        let json_data = serde_json::to_string_pretty(self)
+            .map_err(|e| anyhow!("Failed to serialize todo list: {}", e))?;
+
+        // Write atomically using a temporary file
+        let temp_path = path.with_extension("json.tmp");
+        fs::write(&temp_path, json_data)
+            .map_err(|e| anyhow!("Failed to write to temporary file {}: {}", temp_path.display(), e))?;
+
+        // Atomic rename
+        fs::rename(&temp_path, path)
+            .map_err(|e| anyhow!("Failed to move temporary file to final location {}: {}", path.display(), e))?;
+
+        Ok(())
+    }
+
+    /// Save the todo list to the default file location
+    pub fn save(&self) -> Result<()> {
+        let path = Self::default_file_path()?;
+        self.save_to_file(path)
+    }
+
+    /// Load a todo list from a file
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        let contents = fs::read_to_string(path)
+            .map_err(|e| anyhow!("Failed to read file {}: {}", path.display(), e))?;
+
+        if contents.trim().is_empty() {
+            return Ok(Self::new());
+        }
+
+        let todo_list: Self = serde_json::from_str(&contents)
+            .map_err(|e| anyhow!("Failed to parse JSON from {}: {}. File may be corrupted.", path.display(), e))?;
+
+        Ok(todo_list)
+    }
+
+    /// Load a todo list from the default file location
+    pub fn load() -> Result<Self> {
+        let path = Self::default_file_path()?;
+        Self::load_from_file(path)
     }
 }
 
@@ -665,5 +749,230 @@ mod tests {
 
         let task = todo_list.get_task(id).unwrap();
         assert_eq!(task.due_date, None);
+    }
+
+    #[test]
+    fn test_save_and_load_empty_list() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_empty_todo.json");
+
+        // Clean up any existing test file
+        let _ = fs::remove_file(&test_file);
+
+        let todo_list = TodoList::new();
+        let result = todo_list.save_to_file(&test_file);
+        assert!(result.is_ok());
+
+        let loaded_list = TodoList::load_from_file(&test_file).unwrap();
+        assert!(loaded_list.is_empty());
+        assert_eq!(loaded_list.len(), 0);
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_save_and_load_with_tasks() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_tasks_todo.json");
+
+        // Clean up any existing test file
+        let _ = fs::remove_file(&test_file);
+
+        let mut todo_list = TodoList::new();
+        let id1 = todo_list.add_task("Test task 1".to_string());
+        let id2 = todo_list.add_task_with_details(
+            "Test task 2".to_string(),
+            Some("Description for task 2".to_string()),
+            None,
+            Some("work".to_string()),
+            Priority::High,
+        );
+        todo_list.mark_complete(id1).unwrap();
+
+        let result = todo_list.save_to_file(&test_file);
+        assert!(result.is_ok());
+
+        let loaded_list = TodoList::load_from_file(&test_file).unwrap();
+        assert_eq!(loaded_list.len(), 2);
+
+        let task1 = loaded_list.get_task(id1).unwrap();
+        assert_eq!(task1.title, "Test task 1");
+        assert!(task1.completed);
+
+        let task2 = loaded_list.get_task(id2).unwrap();
+        assert_eq!(task2.title, "Test task 2");
+        assert_eq!(task2.description, Some("Description for task 2".to_string()));
+        assert_eq!(task2.category, Some("work".to_string()));
+        assert_eq!(task2.priority, Priority::High);
+        assert!(!task2.completed);
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_load_nonexistent_file() {
+        let temp_dir = std::env::temp_dir();
+        let nonexistent_file = temp_dir.join("nonexistent_todo.json");
+
+        // Ensure file doesn't exist
+        let _ = fs::remove_file(&nonexistent_file);
+
+        let result = TodoList::load_from_file(&nonexistent_file);
+        assert!(result.is_ok());
+
+        let loaded_list = result.unwrap();
+        assert!(loaded_list.is_empty());
+        assert_eq!(loaded_list.len(), 0);
+    }
+
+    #[test]
+    fn test_load_empty_file() {
+        let temp_dir = std::env::temp_dir();
+        let empty_file = temp_dir.join("empty_todo.json");
+
+        // Create an empty file
+        fs::write(&empty_file, "").unwrap();
+
+        let result = TodoList::load_from_file(&empty_file);
+        assert!(result.is_ok());
+
+        let loaded_list = result.unwrap();
+        assert!(loaded_list.is_empty());
+
+        // Clean up
+        let _ = fs::remove_file(&empty_file);
+    }
+
+    #[test]
+    fn test_load_corrupted_json() {
+        let temp_dir = std::env::temp_dir();
+        let corrupted_file = temp_dir.join("corrupted_todo.json");
+
+        // Create a file with invalid JSON
+        fs::write(&corrupted_file, "{ invalid json content").unwrap();
+
+        let result = TodoList::load_from_file(&corrupted_file);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse JSON"));
+
+        // Clean up
+        let _ = fs::remove_file(&corrupted_file);
+    }
+
+    #[test]
+    fn test_save_creates_directories() {
+        let temp_dir = std::env::temp_dir();
+        let nested_dir = temp_dir.join("nested").join("deep").join("path");
+        let test_file = nested_dir.join("test_todo.json");
+
+        // Ensure directory doesn't exist
+        let _ = fs::remove_dir_all(&nested_dir);
+
+        let todo_list = TodoList::new();
+        let result = todo_list.save_to_file(&test_file);
+        assert!(result.is_ok());
+
+        // Verify file was created
+        assert!(test_file.exists());
+
+        // Clean up
+        let _ = fs::remove_dir_all(temp_dir.join("nested"));
+    }
+
+    #[test]
+    fn test_backup_functionality() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_backup_todo.json");
+        let backup_file = temp_dir.join("test_backup_todo.json.backup");
+
+        // Clean up any existing files
+        let _ = fs::remove_file(&test_file);
+        let _ = fs::remove_file(&backup_file);
+
+        // Create initial file
+        let mut todo_list = TodoList::new();
+        todo_list.add_task("Original task".to_string());
+        todo_list.save_to_file(&test_file).unwrap();
+
+        // Modify and save again
+        todo_list.add_task("New task".to_string());
+        todo_list.save_to_file(&test_file).unwrap();
+
+        // Verify backup was created
+        assert!(backup_file.exists());
+
+        // Load backup and verify it contains original data
+        let backup_list = TodoList::load_from_file(&backup_file).unwrap();
+        assert_eq!(backup_list.len(), 1);
+        assert_eq!(backup_list.get_task(1).unwrap().title, "Original task");
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
+        let _ = fs::remove_file(&backup_file);
+    }
+
+    #[test]
+    fn test_atomic_write() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_atomic_todo.json");
+        let temp_file = temp_dir.join("test_atomic_todo.json.tmp");
+
+        // Clean up any existing files
+        let _ = fs::remove_file(&test_file);
+        let _ = fs::remove_file(&temp_file);
+
+        let mut todo_list = TodoList::new();
+        todo_list.add_task("Atomic write test".to_string());
+
+        let result = todo_list.save_to_file(&test_file);
+        assert!(result.is_ok());
+
+        // Verify final file exists and temp file was cleaned up
+        assert!(test_file.exists());
+        assert!(!temp_file.exists());
+
+        // Verify content is correct
+        let loaded_list = TodoList::load_from_file(&test_file).unwrap();
+        assert_eq!(loaded_list.len(), 1);
+        assert_eq!(loaded_list.get_task(1).unwrap().title, "Atomic write test");
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_default_file_path() {
+        let result = TodoList::default_file_path();
+        assert!(result.is_ok());
+
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains(".todo-cli"));
+        assert!(path.to_string_lossy().ends_with("tasks.json"));
+    }
+
+    #[test]
+    fn test_save_and_load_default_location() {
+        // This test uses the actual default location, so we need to be careful
+        // We'll use a custom file name to avoid conflicts
+        let default_dir = TodoList::default_file_path().unwrap().parent().unwrap().to_path_buf();
+        let test_file = default_dir.join("test_default_todo.json");
+
+        // Clean up any existing test file
+        let _ = fs::remove_file(&test_file);
+
+        let mut todo_list = TodoList::new();
+        todo_list.add_task("Default location test".to_string());
+
+        let result = todo_list.save_to_file(&test_file);
+        assert!(result.is_ok());
+
+        let loaded_list = TodoList::load_from_file(&test_file).unwrap();
+        assert_eq!(loaded_list.len(), 1);
+        assert_eq!(loaded_list.get_task(1).unwrap().title, "Default location test");
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
     }
 }
