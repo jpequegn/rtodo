@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::*;
 
+mod models;
+
 #[derive(Parser)]
 #[command(name = "rtodo")]
 #[command(about = "A simple and efficient todo list CLI written in Rust")]
