@@ -148,8 +148,8 @@ fn test_remove_todo() {
         .output()
         .expect("Failed to add task");
 
-    // Remove the task
-    let output = env.run_rtodo(&["remove", "1"])
+    // Remove the task (using --confirm to skip interactive prompt in tests)
+    let output = env.run_rtodo(&["remove", "1", "--confirm"])
         .output()
         .expect("Failed to execute command");
 
@@ -326,8 +326,8 @@ fn test_help_output() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("rtodo"));
     assert!(stdout.contains("todo list CLI"));
-    assert!(stdout.contains("USAGE:"));
-    assert!(stdout.contains("COMMANDS:"));
+    assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("Commands:"));
 }
 
 #[test]
@@ -749,4 +749,61 @@ fn test_sort_field_values_in_help() {
         stdout.contains("priority") ||
         stdout.contains("title")
     ));
+}
+
+#[test]
+fn test_standalone_incomplete_command() {
+    let env = TestEnv::new();
+
+    // Add and complete a task
+    env.run_rtodo(&["add", "Task to mark incomplete"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["complete", "1"])
+        .output()
+        .expect("Failed to complete task");
+
+    // Use the standalone incomplete command
+    let output = env.run_rtodo(&["incomplete", "1"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Marked as incomplete:"));
+    assert!(stdout.contains("Task to mark incomplete"));
+}
+
+#[test]
+fn test_incomplete_nonexistent_task() {
+    let env = TestEnv::new();
+
+    let output = env.run_rtodo(&["incomplete", "999"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success()); // Command succeeds but shows error
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Error") || stderr.contains("not found"));
+}
+
+#[test]
+fn test_remove_with_confirm_flag() {
+    let env = TestEnv::new();
+
+    // Add a task
+    env.run_rtodo(&["add", "Task to remove with confirm"])
+        .output()
+        .expect("Failed to add task");
+
+    // Remove with --confirm flag (should skip interactive prompt)
+    let output = env.run_rtodo(&["remove", "1", "--confirm"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Removed:"));
+    assert!(stdout.contains("Task to remove with confirm"));
 }
