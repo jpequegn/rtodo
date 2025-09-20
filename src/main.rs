@@ -41,6 +41,14 @@ impl From<PriorityArg> for Priority {
     }
 }
 
+#[derive(Clone, ValueEnum)]
+enum SortField {
+    Created,
+    Due,
+    Priority,
+    Title,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Add a new todo item
@@ -77,6 +85,15 @@ enum Commands {
         /// Show overdue tasks only
         #[arg(short, long)]
         overdue: bool,
+        /// Show tasks due within a week
+        #[arg(short = 'd', long)]
+        due_soon: bool,
+        /// Sort tasks by field
+        #[arg(short = 's', long, value_enum)]
+        sort_by: Option<SortField>,
+        /// Reverse sort order (descending)
+        #[arg(short = 'r', long)]
+        reverse: bool,
     },
     /// Mark a todo item as completed
     Complete {
@@ -119,6 +136,46 @@ fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
     Ok(Local.from_local_datetime(&naive_datetime).unwrap())
 }
 
+fn sort_tasks(mut tasks: Vec<&models::Task>, sort_by: Option<SortField>, reverse: bool) -> Vec<&models::Task> {
+    if let Some(field) = sort_by {
+        tasks.sort_by(|a, b| {
+            let ordering = match field {
+                SortField::Created => a.created_at.cmp(&b.created_at),
+                SortField::Due => {
+                    match (a.due_date, b.due_date) {
+                        (Some(a_due), Some(b_due)) => a_due.cmp(&b_due),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                }
+                SortField::Priority => {
+                    // High = 0, Medium = 1, Low = 2 for ascending priority order
+                    let a_priority = match a.priority {
+                        Priority::High => 0,
+                        Priority::Medium => 1,
+                        Priority::Low => 2,
+                    };
+                    let b_priority = match b.priority {
+                        Priority::High => 0,
+                        Priority::Medium => 1,
+                        Priority::Low => 2,
+                    };
+                    a_priority.cmp(&b_priority)
+                }
+                SortField::Title => a.title.cmp(&b.title),
+            };
+
+            if reverse {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        });
+    }
+    tasks
+}
+
 fn load_todo_list(config_file: Option<PathBuf>) -> Result<TodoList> {
     match config_file {
         Some(path) => TodoList::load_from_file(path),
@@ -158,6 +215,8 @@ fn print_task(task: &models::Task, verbose: bool) {
             let due_str = due_date.format("%Y-%m-%d").to_string();
             if task.is_overdue() {
                 println!("    {}: {}", "Due".red(), due_str.red());
+            } else if task.is_due_soon() {
+                println!("    {}: {}", "Due".yellow(), due_str.yellow());
             } else {
                 println!("    {}: {}", "Due".blue(), due_str.blue());
             }
@@ -198,13 +257,15 @@ fn main() -> Result<()> {
             save_todo_list(&todo_list, cli.config_file)
         }
 
-        Some(Commands::List { completed, pending, category, priority, overdue }) => {
+        Some(Commands::List { completed, pending, category, priority, overdue, due_soon, sort_by, reverse }) => {
             let tasks: Vec<&models::Task> = if completed {
                 todo_list.get_completed_tasks()
             } else if pending {
                 todo_list.get_pending_tasks()
             } else if overdue {
                 todo_list.get_overdue_tasks()
+            } else if due_soon {
+                todo_list.get_due_soon_tasks()
             } else {
                 todo_list.get_all_tasks().iter().collect()
             };
@@ -226,11 +287,13 @@ fn main() -> Result<()> {
                 })
                 .collect();
 
-            if filtered_tasks.is_empty() {
+            let sorted_tasks = sort_tasks(filtered_tasks, sort_by, reverse);
+
+            if sorted_tasks.is_empty() {
                 println!("{}", "No tasks found.".dimmed());
             } else {
-                println!("{} ({} tasks):", "Todo List".cyan().bold(), filtered_tasks.len());
-                for task in filtered_tasks {
+                println!("{} ({} tasks):", "Todo List".cyan().bold(), sorted_tasks.len());
+                for task in sorted_tasks {
                     print_task(task, cli.verbose);
                 }
             }
