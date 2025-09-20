@@ -247,6 +247,87 @@ fn print_task(task: &models::Task, verbose: bool) {
     }
 }
 
+fn show_task_comparison(before: &models::Task, after: &models::Task) {
+    let mut changes = Vec::new();
+
+    // Compare title
+    if before.title != after.title {
+        changes.push(format!("  {}: {} {} {}",
+            "Title".bold(),
+            before.title.red(),
+            "→".dimmed(),
+            after.title.green()
+        ));
+    }
+
+    // Compare description
+    if before.description != after.description {
+        let before_desc = before.description.as_deref().unwrap_or("(none)");
+        let after_desc = after.description.as_deref().unwrap_or("(none)");
+        changes.push(format!("  {}: {} {} {}",
+            "Description".bold(),
+            before_desc.red(),
+            "→".dimmed(),
+            after_desc.green()
+        ));
+    }
+
+    // Compare due date
+    if before.due_date != after.due_date {
+        let before_due = before.due_date.map_or("(none)".to_string(), |d| d.format("%Y-%m-%d").to_string());
+        let after_due = after.due_date.map_or("(none)".to_string(), |d| d.format("%Y-%m-%d").to_string());
+        changes.push(format!("  {}: {} {} {}",
+            "Due date".bold(),
+            before_due.red(),
+            "→".dimmed(),
+            after_due.green()
+        ));
+    }
+
+    // Compare category
+    if before.category != after.category {
+        let before_cat = before.category.as_deref().unwrap_or("(none)");
+        let after_cat = after.category.as_deref().unwrap_or("(none)");
+        changes.push(format!("  {}: {} {} {}",
+            "Category".bold(),
+            before_cat.red(),
+            "→".dimmed(),
+            after_cat.green()
+        ));
+    }
+
+    // Compare priority
+    if before.priority != after.priority {
+        changes.push(format!("  {}: {} {} {}",
+            "Priority".bold(),
+            format!("{:?}", before.priority).to_lowercase().red(),
+            "→".dimmed(),
+            format!("{:?}", after.priority).to_lowercase().green()
+        ));
+    }
+
+    // Compare completion status
+    if before.completed != after.completed {
+        let before_status = if before.completed { "completed" } else { "incomplete" };
+        let after_status = if after.completed { "completed" } else { "incomplete" };
+        changes.push(format!("  {}: {} {} {}",
+            "Status".bold(),
+            before_status.red(),
+            "→".dimmed(),
+            after_status.green()
+        ));
+    }
+
+    if changes.is_empty() {
+        println!("  {}", "No changes made".dimmed());
+    } else {
+        println!("{}", "Changes:".yellow().bold());
+        for change in changes {
+            println!("{}", change);
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -414,6 +495,15 @@ fn main() -> Result<()> {
         }
 
         Some(Commands::Edit { id, title, description, due, category, priority, incomplete }) => {
+            // Get the task before making changes for comparison
+            let task_before = match todo_list.get_task(id) {
+                Some(task) => task.clone(),
+                None => {
+                    eprintln!("{}: Task with ID {} not found", "Error".red().bold(), id);
+                    return Ok(());
+                }
+            };
+
             let mut update = TaskUpdate::new();
 
             if let Some(new_title) = title {
@@ -454,8 +544,9 @@ fn main() -> Result<()> {
                     if incomplete {
                         todo_list.mark_incomplete(id)?;
                     }
-                    if let Some(task) = todo_list.get_task(id) {
-                        println!("{} {}", "Updated:".blue().bold(), task.title);
+                    if let Some(task_after) = todo_list.get_task(id) {
+                        println!("{} [{}]", "Updated task".blue().bold(), id.to_string().cyan());
+                        show_task_comparison(&task_before, task_after);
                     }
                     save_todo_list(&todo_list, cli.config_file)
                 }
