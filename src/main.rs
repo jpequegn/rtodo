@@ -1,3 +1,30 @@
+//! RTodo - A simple and efficient todo list CLI application written in Rust
+//!
+//! This module contains the main CLI interface and command handling logic for RTodo.
+//! RTodo provides a clean command-line interface for managing daily tasks with support
+//! for due dates, categories, priorities, completion tracking, and colorized output.
+//!
+//! # Features
+//!
+//! - Add todos with optional due dates, categories, and priorities
+//! - List todos with various filtering options
+//! - Search todos by text content with regex support
+//! - Mark todos as complete or incomplete
+//! - Edit existing todos
+//! - Organize todos by categories
+//! - View todos by due dates (today, overdue)
+//! - Natural language date parsing ("tomorrow", "next Friday")
+//! - Colorized terminal output for better readability
+//!
+//! # Usage
+//!
+//! ```bash
+//! rtodo add "Buy groceries" --due tomorrow --category personal
+//! rtodo list --pending --category work
+//! rtodo complete 1
+//! rtodo search "project" --regex
+//! ```
+
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use chrono_english;
@@ -9,6 +36,11 @@ use std::path::PathBuf;
 mod models;
 use models::{Priority, TaskUpdate, TodoList};
 
+/// Main CLI structure for parsing command line arguments
+///
+/// This struct defines the top-level command-line interface for RTodo.
+/// It includes global options like verbose output and custom config file paths,
+/// as well as the subcommand to execute.
 #[derive(Parser)]
 #[command(name = "rtodo")]
 #[command(about = "A simple and efficient todo list CLI written in Rust")]
@@ -26,10 +58,17 @@ struct Cli {
     command: Option<Commands>,
 }
 
+/// Priority levels for command line argument parsing
+///
+/// This enum represents the priority levels that can be specified via command line
+/// arguments. It maps to the internal `Priority` enum used in the task model.
 #[derive(Clone, ValueEnum)]
 enum PriorityArg {
+    /// Low priority task
     Low,
+    /// Medium priority task (default)
     Medium,
+    /// High priority task
     High,
 }
 
@@ -43,11 +82,19 @@ impl From<PriorityArg> for Priority {
     }
 }
 
+/// Fields available for sorting tasks
+///
+/// This enum defines the different fields by which tasks can be sorted
+/// when displaying lists of tasks.
 #[derive(Clone, ValueEnum)]
 enum SortField {
+    /// Sort by task creation date
     Created,
+    /// Sort by due date (tasks without due dates appear last)
     Due,
+    /// Sort by priority (High -> Medium -> Low)
     Priority,
+    /// Sort by task title (alphabetical)
     Title,
 }
 
@@ -205,6 +252,30 @@ enum Commands {
     },
 }
 
+/// Parse a date string using natural language or ISO format
+///
+/// This function attempts to parse date strings in two ways:
+/// 1. Natural language parsing using chrono-english (e.g., "tomorrow", "next Friday")
+/// 2. ISO format parsing (YYYY-MM-DD)
+///
+/// All parsed dates are set to end of day (23:59:59) for consistency in due date handling.
+///
+/// # Arguments
+///
+/// * `date_str` - The date string to parse
+///
+/// # Returns
+///
+/// * `Ok(DateTime<Local>)` - Successfully parsed date set to end of day
+/// * `Err(anyhow::Error)` - Parsing failed for both natural language and ISO format
+///
+/// # Examples
+///
+/// ```
+/// let tomorrow = parse_date("tomorrow")?;
+/// let specific = parse_date("2024-12-31")?;
+/// let natural = parse_date("next Friday")?;
+/// ```
 fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
     // First try natural language parsing
     if let Ok(parsed) = chrono_english::parse_date_string(date_str, Local::now(), chrono_english::Dialect::Us) {
@@ -219,6 +290,29 @@ fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
     Ok(Local.from_local_datetime(&naive_datetime).unwrap())
 }
 
+/// Highlight search query matches in text with colored output
+///
+/// This function searches for matches of a query string within text and highlights
+/// them using terminal colors (bright yellow background with black text).
+/// Supports both regular text search and regex pattern matching.
+///
+/// # Arguments
+///
+/// * `text` - The text to search within
+/// * `query` - The search query or regex pattern
+/// * `case_insensitive` - Whether to perform case-insensitive matching
+/// * `use_regex` - Whether to treat the query as a regex pattern
+///
+/// # Returns
+///
+/// * `String` - The text with highlighted matches, or original text if no matches
+///
+/// # Examples
+///
+/// ```
+/// let highlighted = highlight_text("Buy groceries", "Buy", false, false);
+/// // Returns "Buy" with yellow background + "groceries" in normal colors
+/// ```
 fn highlight_text(text: &str, query: &str, case_insensitive: bool, use_regex: bool) -> String {
     use regex::Regex;
     use colored::*;
@@ -331,6 +425,31 @@ fn print_task_with_highlight(task: &models::Task, verbose: bool, query: &str, ca
     }
 }
 
+/// Sort a vector of task references by the specified field
+///
+/// This function sorts tasks by different criteria (creation date, due date, priority, or title).
+/// For due date sorting, tasks without due dates appear after tasks with due dates.
+/// For priority sorting, the order is High -> Medium -> Low when not reversed.
+///
+/// # Arguments
+///
+/// * `tasks` - Vector of task references to sort
+/// * `sort_by` - Optional field to sort by (None means no sorting)
+/// * `reverse` - Whether to reverse the sort order (descending instead of ascending)
+///
+/// # Returns
+///
+/// * `Vec<&models::Task>` - Sorted vector of task references
+///
+/// # Examples
+///
+/// ```
+/// let sorted = sort_tasks(tasks, Some(SortField::Priority), false);
+/// // Returns tasks sorted High -> Medium -> Low priority
+///
+/// let reverse_sorted = sort_tasks(tasks, Some(SortField::Due), true);
+/// // Returns tasks sorted by due date, latest first
+/// ```
 fn sort_tasks(mut tasks: Vec<&models::Task>, sort_by: Option<SortField>, reverse: bool) -> Vec<&models::Task> {
     if let Some(field) = sort_by {
         tasks.sort_by(|a, b| {
@@ -371,6 +490,29 @@ fn sort_tasks(mut tasks: Vec<&models::Task>, sort_by: Option<SortField>, reverse
     tasks
 }
 
+/// Prompt the user for confirmation of a potentially destructive action
+///
+/// This function displays a message and waits for user input to confirm or deny
+/// an action. Only explicit "y" or "yes" responses are treated as confirmation.
+/// All other responses (including empty input) are treated as denial.
+///
+/// # Arguments
+///
+/// * `message` - The confirmation message to display to the user
+///
+/// # Returns
+///
+/// * `bool` - `true` if user confirmed (y/yes), `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// if confirm_action("Delete all completed tasks?") {
+///     // User confirmed, proceed with deletion
+/// } else {
+///     // User denied or gave unclear response, cancel operation
+/// }
+/// ```
 fn confirm_action(message: &str) -> bool {
     print!("{} (y/N): ", message);
     io::stdout().flush().unwrap();
@@ -395,6 +537,29 @@ fn save_todo_list(todo_list: &TodoList, config_file: Option<PathBuf>) -> Result<
     }
 }
 
+/// Format a human-readable string describing time until or since due date
+///
+/// This function calculates the time difference between now and a due date,
+/// returning a formatted string that describes the relationship in natural language.
+///
+/// # Arguments
+///
+/// * `due_date` - The due date to compare against current time
+///
+/// # Returns
+///
+/// * `String` - Human-readable description of time until/since due date
+///
+/// # Examples
+///
+/// ```
+/// // If today is 2024-09-21:
+/// let due_today = Local::now().date_naive().and_hms_opt(23, 59, 59).unwrap();
+/// assert_eq!(format_time_until_due(Local.from_local_datetime(&due_today).unwrap()), "due today");
+///
+/// let due_tomorrow = due_today + Duration::days(1);
+/// assert_eq!(format_time_until_due(Local.from_local_datetime(&due_tomorrow).unwrap()), "due tomorrow");
+/// ```
 fn format_time_until_due(due_date: DateTime<Local>) -> String {
     let now = Local::now();
     let duration = due_date.signed_duration_since(now);

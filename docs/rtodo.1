@@ -1,0 +1,253 @@
+.TH RTODO 1 "2024-09-21" "RTodo 0.1.0" "User Commands"
+.SH NAME
+rtodo \- a simple and efficient todo list CLI application
+.SH SYNOPSIS
+.B rtodo
+.I COMMAND
+[\fIOPTIONS\fR]
+.br
+.B rtodo
+.B \-\-help
+.br
+.B rtodo
+.B \-\-version
+.SH DESCRIPTION
+.B rtodo
+is a command-line todo list manager built with Rust, focusing on simplicity, speed, and reliability. It provides a clean interface for managing daily tasks with support for due dates, categories, completion tracking, and colorized output.
+
+RTodo stores data in JSON format in the user's home directory and supports natural language date parsing for flexible due date input.
+
+.SH COMMANDS
+.TP
+.B add \fITITLE\fR [\fIOPTIONS\fR]
+Add a new todo item with the specified title. Supports optional due dates, categories, and priorities.
+
+.RS
+.TP
+.B \-\-due \fIDATE\fR
+Set due date. Accepts ISO format (YYYY-MM-DD) or natural language like "tomorrow", "next Friday", "in 3 days".
+
+.TP
+.B \-\-category \fICATEGORY\fR
+Assign todo to a category for organization.
+
+.TP
+.B \-\-priority \fIPRIORITY\fR
+Set priority level: low, medium, high.
+.RE
+
+.TP
+.B list [\fIOPTIONS\fR]
+List todo items with optional filtering.
+
+.RS
+.TP
+.B \-\-pending
+Show only pending (incomplete) todos.
+
+.TP
+.B \-\-completed
+Show only completed todos.
+
+.TP
+.B \-\-category \fICATEGORY\fR
+Filter by specific category.
+
+.TP
+.B \-\-all
+Show all todos (default behavior).
+.RE
+
+.TP
+.B search \fITEXT\fR
+Search for todos containing the specified text in title, description, or category.
+
+.TP
+.B complete \fIID\fR
+Mark the todo with the specified ID as completed.
+
+.TP
+.B incomplete \fIID\fR
+Mark the todo with the specified ID as incomplete (undo completion).
+
+.TP
+.B remove \fIID\fR [\fIOPTIONS\fR]
+Remove the todo with the specified ID.
+
+.RS
+.TP
+.B \-\-confirm
+Prompt for confirmation before removal.
+.RE
+
+.TP
+.B edit \fIID\fR [\fIOPTIONS\fR]
+Edit an existing todo item.
+
+.RS
+.TP
+.B \-\-title \fITITLE\fR
+Update the todo title.
+
+.TP
+.B \-\-due \fIDATE\fR
+Update the due date.
+
+.TP
+.B \-\-category \fICATEGORY\fR
+Update the category.
+
+.TP
+.B \-\-priority \fIPRIORITY\fR
+Update the priority level.
+.RE
+
+.TP
+.B categories
+List all categories with task counts.
+
+.TP
+.B rename-category \fIOLD_NAME\fR \fINEW_NAME\fR
+Rename a category across all tasks that use it.
+
+.TP
+.B due-today
+Show all tasks that are due today.
+
+.TP
+.B overdue
+Show all tasks that are past their due date.
+
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Show help information for the command.
+
+.TP
+.B \-V, \-\-version
+Show version information.
+
+.SH EXAMPLES
+.TP
+Add a simple todo:
+.B rtodo add "Buy groceries"
+
+.TP
+Add todo with due date:
+.B rtodo add "Finish project" \-\-due 2024-12-31
+
+.TP
+Add todo with natural language date:
+.B rtodo add "Meeting with team" \-\-due "tomorrow"
+
+.TP
+Add todo with category and priority:
+.B rtodo add "Review code" \-\-category work \-\-priority high
+
+.TP
+List all pending todos:
+.B rtodo list \-\-pending
+
+.TP
+List todos in specific category:
+.B rtodo list \-\-category work
+
+.TP
+Search for todos:
+.B rtodo search "groceries"
+
+.TP
+Complete a todo:
+.B rtodo complete 1
+
+.TP
+Edit a todo's title and due date:
+.B rtodo edit 1 \-\-title "Updated title" \-\-due "next Monday"
+
+.TP
+View today's tasks:
+.B rtodo due-today
+
+.TP
+Check overdue tasks:
+.B rtodo overdue
+
+.TP
+Rename a category:
+.B rtodo rename-category work professional
+
+.SH FILES
+.TP
+.I ~/.rtodo/todos.json
+Main data file containing all todos (Linux/macOS).
+
+.TP
+.I %APPDATA%\\rtodo\\todos.json
+Main data file containing all todos (Windows).
+
+.SH DATA FORMAT
+RTodo stores data in JSON format with the following structure:
+.br
+{
+.br
+  "tasks": [
+.br
+    {
+.br
+      "id": 1,
+.br
+      "title": "Task title",
+.br
+      "description": null,
+.br
+      "completed": false,
+.br
+      "created_at": "2024-09-21T07:16:57.296419-04:00",
+.br
+      "due_date": "2024-09-22T23:59:59-04:00",
+.br
+      "category": "work",
+.br
+      "priority": "Medium"
+.br
+    }
+.br
+  ],
+.br
+  "next_id": 2
+.br
+}
+
+.SH EXIT STATUS
+.TP
+.B 0
+Successful execution.
+
+.TP
+.B 1
+General error (invalid arguments, file not found, etc.).
+
+.TP
+.B 2
+Configuration or data file error.
+
+.SH ENVIRONMENT
+.TP
+.B RUST_LOG
+Set logging level for debugging. Example: RUST_LOG=debug rtodo list
+
+.SH BUGS
+Report bugs at: https://github.com/your-username/rtodo/issues
+
+Include your operating system, Rust version, and the exact command that failed.
+
+.SH SEE ALSO
+.BR todo (1),
+.BR task (1),
+.BR taskwarrior (1)
+
+.SH AUTHOR
+RTodo Contributors
+
+.SH COPYRIGHT
+Copyright (c) 2024 RTodo Contributors. Licensed under the MIT License.
