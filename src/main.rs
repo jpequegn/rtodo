@@ -140,6 +140,15 @@ enum Commands {
         #[arg(long)]
         incomplete: bool,
     },
+    /// List all categories with task counts
+    Categories,
+    /// Rename a category across all tasks
+    RenameCategory {
+        /// Current category name
+        old_name: String,
+        /// New category name
+        new_name: String,
+    },
 }
 
 fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
@@ -548,6 +557,66 @@ fn main() -> Result<()> {
                         println!("{} [{}]", "Updated task".blue().bold(), id.to_string().cyan());
                         show_task_comparison(&task_before, task_after);
                     }
+                    save_todo_list(&todo_list, cli.config_file)
+                }
+                Err(e) => {
+                    eprintln!("{}: {}", "Error".red().bold(), e);
+                    Ok(())
+                }
+            }
+        }
+
+        Some(Commands::Categories) => {
+            let categories = todo_list.get_all_categories();
+
+            if categories.is_empty() {
+                println!("{}", "No categories found.".dimmed());
+            } else {
+                println!("{}", "Categories:".cyan().bold());
+
+                // Sort categories alphabetically
+                let mut sorted_categories: Vec<(&String, &usize)> = categories.iter().collect();
+                sorted_categories.sort_by_key(|(name, _)| name.as_str());
+
+                for (category, count) in sorted_categories {
+                    let task_word = if *count == 1 { "task" } else { "tasks" };
+                    println!("  {} {} ({} {})",
+                        format!("#{}", category).green(),
+                        category.bold(),
+                        count.to_string().cyan(),
+                        task_word.dimmed()
+                    );
+                }
+
+                let total_categories = categories.len();
+                let total_tasks: usize = categories.values().sum();
+                println!();
+                println!("{} {} categories with {} {} total",
+                    "Summary:".bold(),
+                    total_categories.to_string().cyan(),
+                    total_tasks.to_string().cyan(),
+                    if total_tasks == 1 { "task" } else { "tasks" }
+                );
+            }
+            Ok(())
+        }
+
+        Some(Commands::RenameCategory { old_name, new_name }) => {
+            if old_name == new_name {
+                eprintln!("{}: Old and new category names are the same", "Error".red().bold());
+                return Ok(());
+            }
+
+            match todo_list.rename_category(&old_name, &new_name) {
+                Ok(count) => {
+                    let task_word = if count == 1 { "task" } else { "tasks" };
+                    println!("{} Renamed category '{}' to '{}' for {} {}",
+                        "Success:".green().bold(),
+                        old_name.yellow(),
+                        new_name.green(),
+                        count.to_string().cyan(),
+                        task_word
+                    );
                     save_todo_list(&todo_list, cli.config_file)
                 }
                 Err(e) => {
