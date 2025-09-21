@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
+use chrono_english;
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::*;
 use std::io::{self, Write};
@@ -184,9 +185,35 @@ enum Commands {
         /// New category name
         new_name: String,
     },
+    /// Show tasks due today
+    DueToday {
+        /// Sort tasks by field
+        #[arg(short = 's', long, value_enum)]
+        sort_by: Option<SortField>,
+        /// Reverse sort order (descending)
+        #[arg(short = 'r', long)]
+        reverse: bool,
+    },
+    /// Show overdue tasks
+    Overdue {
+        /// Sort tasks by field
+        #[arg(short = 's', long, value_enum)]
+        sort_by: Option<SortField>,
+        /// Reverse sort order (descending)
+        #[arg(short = 'r', long)]
+        reverse: bool,
+    },
 }
 
 fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
+    // First try natural language parsing
+    if let Ok(parsed) = chrono_english::parse_date_string(date_str, Local::now(), chrono_english::Dialect::Us) {
+        // Set time to end of day (23:59:59) for consistency
+        let end_of_day = parsed.date_naive().and_hms_opt(23, 59, 59).unwrap();
+        return Ok(Local.from_local_datetime(&end_of_day).unwrap());
+    }
+
+    // Fallback to the original YYYY-MM-DD format
     let naive_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")?;
     let naive_datetime = naive_date.and_hms_opt(23, 59, 59).unwrap();
     Ok(Local.from_local_datetime(&naive_datetime).unwrap())
@@ -266,6 +293,20 @@ fn print_task_with_highlight(task: &models::Task, verbose: bool, query: &str, ca
         print!(" {}", format!("#{}", category).green());
     }
 
+    // Show time until due in the main line
+    if let Some(due_date) = task.due_date {
+        let time_until = format_time_until_due(due_date);
+        if task.is_overdue() {
+            print!(" ({})", time_until.red());
+        } else if task.is_due_today() {
+            print!(" ({})", time_until.yellow().bold());
+        } else if task.is_due_soon() {
+            print!(" ({})", time_until.yellow());
+        } else {
+            print!(" ({})", time_until.blue());
+        }
+    }
+
     println!(" {}", format!("[{}]", format!("{:?}", task.priority).to_lowercase()).color(priority_color));
 
     if verbose {
@@ -276,12 +317,15 @@ fn print_task_with_highlight(task: &models::Task, verbose: bool, query: &str, ca
         }
         if let Some(due_date) = task.due_date {
             let due_str = due_date.format("%Y-%m-%d").to_string();
+            let time_until = format_time_until_due(due_date);
             if task.is_overdue() {
-                println!("    {}: {}", "Due".red(), due_str.red());
+                println!("    {}: {} ({})", "Due".red(), due_str.red(), time_until.red());
+            } else if task.is_due_today() {
+                println!("    {}: {} ({})", "Due".yellow().bold(), due_str.yellow().bold(), time_until.yellow().bold());
             } else if task.is_due_soon() {
-                println!("    {}: {}", "Due".yellow(), due_str.yellow());
+                println!("    {}: {} ({})", "Due".yellow(), due_str.yellow(), time_until.yellow());
             } else {
-                println!("    {}: {}", "Due".blue(), due_str.blue());
+                println!("    {}: {} ({})", "Due".blue(), due_str.blue(), time_until.blue());
             }
         }
     }
@@ -351,6 +395,23 @@ fn save_todo_list(todo_list: &TodoList, config_file: Option<PathBuf>) -> Result<
     }
 }
 
+fn format_time_until_due(due_date: DateTime<Local>) -> String {
+    let now = Local::now();
+    let duration = due_date.signed_duration_since(now);
+
+    if duration.num_days() == 0 {
+        "due today".to_string()
+    } else if duration.num_days() == 1 {
+        "due tomorrow".to_string()
+    } else if duration.num_days() > 0 {
+        format!("due in {} days", duration.num_days())
+    } else if duration.num_days() == -1 {
+        "1 day overdue".to_string()
+    } else {
+        format!("{} days overdue", -duration.num_days())
+    }
+}
+
 fn print_task(task: &models::Task, verbose: bool) {
     let status_icon = if task.completed { "✓".green() } else { "○".yellow() };
     let priority_color = match task.priority {
@@ -366,6 +427,20 @@ fn print_task(task: &models::Task, verbose: bool) {
         print!(" {}", format!("#{}", category).green());
     }
 
+    // Show time until due in the main line
+    if let Some(due_date) = task.due_date {
+        let time_until = format_time_until_due(due_date);
+        if task.is_overdue() {
+            print!(" ({})", time_until.red());
+        } else if task.is_due_today() {
+            print!(" ({})", time_until.yellow().bold());
+        } else if task.is_due_soon() {
+            print!(" ({})", time_until.yellow());
+        } else {
+            print!(" ({})", time_until.blue());
+        }
+    }
+
     println!(" {}", format!("[{}]", format!("{:?}", task.priority).to_lowercase()).color(priority_color));
 
     if verbose {
@@ -374,12 +449,15 @@ fn print_task(task: &models::Task, verbose: bool) {
         }
         if let Some(due_date) = task.due_date {
             let due_str = due_date.format("%Y-%m-%d").to_string();
+            let time_until = format_time_until_due(due_date);
             if task.is_overdue() {
-                println!("    {}: {}", "Due".red(), due_str.red());
+                println!("    {}: {} ({})", "Due".red(), due_str.red(), time_until.red());
+            } else if task.is_due_today() {
+                println!("    {}: {} ({})", "Due".yellow().bold(), due_str.yellow().bold(), time_until.yellow().bold());
             } else if task.is_due_soon() {
-                println!("    {}: {}", "Due".yellow(), due_str.yellow());
+                println!("    {}: {} ({})", "Due".yellow(), due_str.yellow(), time_until.yellow());
             } else {
-                println!("    {}: {}", "Due".blue(), due_str.blue());
+                println!("    {}: {} ({})", "Due".blue(), due_str.blue(), time_until.blue());
             }
         }
         println!("    {}: {}", "Created".dimmed(), task.created_at.format("%Y-%m-%d %H:%M").to_string().dimmed());
@@ -831,6 +909,36 @@ fn main() -> Result<()> {
                     Ok(())
                 }
             }
+        }
+
+        Some(Commands::DueToday { sort_by, reverse }) => {
+            let tasks = todo_list.get_due_today_tasks();
+            let sorted_tasks = sort_tasks(tasks, sort_by, reverse);
+
+            if sorted_tasks.is_empty() {
+                println!("{}", "No tasks due today.".dimmed());
+            } else {
+                println!("{} ({} tasks):", "Tasks Due Today".cyan().bold(), sorted_tasks.len());
+                for task in sorted_tasks {
+                    print_task(task, cli.verbose);
+                }
+            }
+            Ok(())
+        }
+
+        Some(Commands::Overdue { sort_by, reverse }) => {
+            let tasks = todo_list.get_overdue_tasks();
+            let sorted_tasks = sort_tasks(tasks, sort_by, reverse);
+
+            if sorted_tasks.is_empty() {
+                println!("{}", "No overdue tasks.".dimmed());
+            } else {
+                println!("{} ({} tasks):", "Overdue Tasks".red().bold(), sorted_tasks.len());
+                for task in sorted_tasks {
+                    print_task(task, cli.verbose);
+                }
+            }
+            Ok(())
         }
 
         None => {
