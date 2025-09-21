@@ -818,3 +818,142 @@ fn test_remove_with_confirm_flag() {
     assert!(stdout.contains("Removed:"));
     assert!(stdout.contains("Task to remove with confirm"));
 }
+
+#[test]
+fn test_categories_empty() {
+    let env = TestEnv::new();
+
+    let output = env.run_rtodo(&["categories"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("No categories found."));
+}
+
+#[test]
+fn test_categories_with_data() {
+    let env = TestEnv::new();
+
+    // Add tasks with different categories
+    env.run_rtodo(&["add", "Work task 1", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Work task 2", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Personal task", "--category", "personal"])
+        .output()
+        .expect("Failed to add task");
+
+    let output = env.run_rtodo(&["categories"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Categories:"));
+    assert!(stdout.contains("#personal personal (1 task)"));
+    assert!(stdout.contains("#work work (2 tasks)"));
+    assert!(stdout.contains("Summary: 2 categories with 3 tasks total"));
+}
+
+#[test]
+fn test_rename_category_success() {
+    let env = TestEnv::new();
+
+    // Add tasks with a category
+    env.run_rtodo(&["add", "Work task 1", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Work task 2", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    // Rename the category
+    let output = env.run_rtodo(&["rename-category", "work", "business"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Success: Renamed category 'work' to 'business' for 2 tasks"));
+
+    // Verify the category was renamed
+    let output = env.run_rtodo(&["categories"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("#business business (2 tasks)"));
+    assert!(!stdout.contains("#work"));
+}
+
+#[test]
+fn test_rename_category_not_found() {
+    let env = TestEnv::new();
+
+    let output = env.run_rtodo(&["rename-category", "nonexistent", "newname"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success()); // Command runs but shows error
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Error: No tasks found with category 'nonexistent'"));
+}
+
+#[test]
+fn test_rename_category_same_names() {
+    let env = TestEnv::new();
+
+    // Add a task with a category
+    env.run_rtodo(&["add", "Work task", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    let output = env.run_rtodo(&["rename-category", "work", "work"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success()); // Command runs but shows error
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Error: Old and new category names are the same"));
+}
+
+#[test]
+fn test_categories_alphabetical_sorting() {
+    let env = TestEnv::new();
+
+    // Add tasks with categories in non-alphabetical order
+    env.run_rtodo(&["add", "Zoo task", "--category", "zoo"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Apple task", "--category", "apple"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Middle task", "--category", "middle"])
+        .output()
+        .expect("Failed to add task");
+
+    let output = env.run_rtodo(&["categories"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Verify alphabetical order
+    let apple_pos = stdout.find("#apple").unwrap();
+    let middle_pos = stdout.find("#middle").unwrap();
+    let zoo_pos = stdout.find("#zoo").unwrap();
+
+    assert!(apple_pos < middle_pos);
+    assert!(middle_pos < zoo_pos);
+}

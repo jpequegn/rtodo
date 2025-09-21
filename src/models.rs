@@ -304,6 +304,40 @@ impl TodoList {
         self.tasks.iter().filter(|task| task.is_due_soon()).collect()
     }
 
+    /// Get all categories with their task counts
+    pub fn get_all_categories(&self) -> std::collections::HashMap<String, usize> {
+        use std::collections::HashMap;
+        let mut category_counts = HashMap::new();
+
+        for task in &self.tasks {
+            if let Some(category) = &task.category {
+                *category_counts.entry(category.clone()).or_insert(0) += 1;
+            }
+        }
+
+        category_counts
+    }
+
+    /// Rename a category across all tasks
+    pub fn rename_category(&mut self, old_name: &str, new_name: &str) -> Result<usize> {
+        let mut count = 0;
+
+        for task in &mut self.tasks {
+            if let Some(category) = &mut task.category {
+                if category == old_name {
+                    *category = new_name.to_string();
+                    count += 1;
+                }
+            }
+        }
+
+        if count == 0 {
+            return Err(anyhow!("No tasks found with category '{}'", old_name));
+        }
+
+        Ok(count)
+    }
+
     /// Get the total number of tasks
     pub fn len(&self) -> usize {
         self.tasks.len()
@@ -990,5 +1024,164 @@ mod tests {
 
         // Clean up
         let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_get_all_categories_empty() {
+        let todo_list = TodoList::new();
+        let categories = todo_list.get_all_categories();
+        assert!(categories.is_empty());
+    }
+
+    #[test]
+    fn test_get_all_categories_with_data() {
+        let mut todo_list = TodoList::new();
+
+        // Add tasks with various categories
+        todo_list.add_task_with_details(
+            "Work task 1".to_string(),
+            None,
+            None,
+            Some("work".to_string()),
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Work task 2".to_string(),
+            None,
+            None,
+            Some("work".to_string()),
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Personal task".to_string(),
+            None,
+            None,
+            Some("personal".to_string()),
+            Priority::Medium,
+        );
+
+        // Add task without category
+        todo_list.add_task_with_details(
+            "No category task".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        let categories = todo_list.get_all_categories();
+
+        assert_eq!(categories.len(), 2);
+        assert_eq!(categories.get("work"), Some(&2));
+        assert_eq!(categories.get("personal"), Some(&1));
+        assert_eq!(categories.get("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_rename_category_success() {
+        let mut todo_list = TodoList::new();
+
+        // Add tasks with the same category
+        todo_list.add_task_with_details(
+            "Work task 1".to_string(),
+            None,
+            None,
+            Some("work".to_string()),
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Work task 2".to_string(),
+            None,
+            None,
+            Some("work".to_string()),
+            Priority::Medium,
+        );
+
+        // Rename the category
+        let result = todo_list.rename_category("work", "business");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2);
+
+        // Verify the rename worked
+        let categories = todo_list.get_all_categories();
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories.get("business"), Some(&2));
+        assert_eq!(categories.get("work"), None);
+
+        // Verify the tasks were updated
+        for task in todo_list.get_all_tasks() {
+            if task.category.is_some() {
+                assert_eq!(task.category.as_ref().unwrap(), "business");
+            }
+        }
+    }
+
+    #[test]
+    fn test_rename_category_not_found() {
+        let mut todo_list = TodoList::new();
+
+        // Add a task with a different category
+        todo_list.add_task_with_details(
+            "Personal task".to_string(),
+            None,
+            None,
+            Some("personal".to_string()),
+            Priority::Medium,
+        );
+
+        // Try to rename a non-existent category
+        let result = todo_list.rename_category("work", "business");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "No tasks found with category 'work'");
+
+        // Verify nothing changed
+        let categories = todo_list.get_all_categories();
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories.get("personal"), Some(&1));
+    }
+
+    #[test]
+    fn test_rename_category_partial_match() {
+        let mut todo_list = TodoList::new();
+
+        // Add tasks with different categories
+        todo_list.add_task_with_details(
+            "Work task".to_string(),
+            None,
+            None,
+            Some("work".to_string()),
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Personal task".to_string(),
+            None,
+            None,
+            Some("personal".to_string()),
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "No category task".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Rename only the work category
+        let result = todo_list.rename_category("work", "business");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+
+        // Verify only the work category was renamed
+        let categories = todo_list.get_all_categories();
+        assert_eq!(categories.len(), 2);
+        assert_eq!(categories.get("business"), Some(&1));
+        assert_eq!(categories.get("personal"), Some(&1));
+        assert_eq!(categories.get("work"), None);
     }
 }
