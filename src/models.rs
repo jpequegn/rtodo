@@ -143,6 +143,18 @@ impl Task {
             false
         }
     }
+
+    /// Check if the task is due today
+    pub fn is_due_today(&self) -> bool {
+        if let Some(due_date) = self.due_date {
+            let now = Local::now();
+            let today = now.date_naive();
+            let due_date_naive = due_date.date_naive();
+            !self.completed && due_date_naive == today
+        } else {
+            false
+        }
+    }
 }
 
 /// Collection of tasks with management operations
@@ -302,6 +314,11 @@ impl TodoList {
     /// Get tasks due soon (within a week)
     pub fn get_due_soon_tasks(&self) -> Vec<&Task> {
         self.tasks.iter().filter(|task| task.is_due_soon()).collect()
+    }
+
+    /// Get tasks due today
+    pub fn get_due_today_tasks(&self) -> Vec<&Task> {
+        self.tasks.iter().filter(|task| task.is_due_today()).collect()
     }
 
     /// Get all categories with their task counts
@@ -1431,5 +1448,106 @@ mod tests {
         // Search should work even with tasks that have no description
         let results = todo_list.search_tasks("description", false, false).unwrap();
         assert_eq!(results.len(), 2); // Both tasks have "description" in title
+    }
+
+    #[test]
+    fn test_is_due_today() {
+        let today = Local::now();
+
+        // Task due today
+        let due_today_task = Task::with_details(
+            1,
+            "Due today task".to_string(),
+            None,
+            Some(today),
+            None,
+            Priority::Medium,
+        );
+        assert!(due_today_task.is_due_today());
+
+        // Task due tomorrow
+        let tomorrow = today + chrono::Duration::days(1);
+        let due_tomorrow_task = Task::with_details(
+            2,
+            "Due tomorrow task".to_string(),
+            None,
+            Some(tomorrow),
+            None,
+            Priority::Medium,
+        );
+        assert!(!due_tomorrow_task.is_due_today());
+
+        // Task due yesterday (overdue)
+        let yesterday = today - chrono::Duration::days(1);
+        let overdue_task = Task::with_details(
+            3,
+            "Overdue task".to_string(),
+            None,
+            Some(yesterday),
+            None,
+            Priority::Medium,
+        );
+        assert!(!overdue_task.is_due_today());
+
+        // Task with no due date
+        let no_due_date_task = Task::new(4, "No due date".to_string());
+        assert!(!no_due_date_task.is_due_today());
+
+        // Completed task due today should not be considered due today
+        let mut completed_task = Task::with_details(
+            5,
+            "Completed task".to_string(),
+            None,
+            Some(today),
+            None,
+            Priority::Medium,
+        );
+        completed_task.complete();
+        assert!(!completed_task.is_due_today());
+    }
+
+    #[test]
+    fn test_get_due_today_tasks() {
+        let mut todo_list = TodoList::new();
+        let today = Local::now();
+        let tomorrow = today + chrono::Duration::days(1);
+        let yesterday = today - chrono::Duration::days(1);
+
+        // Add tasks with different due dates
+        todo_list.add_task_with_details(
+            "Due today".to_string(),
+            None,
+            Some(today),
+            None,
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Due tomorrow".to_string(),
+            None,
+            Some(tomorrow),
+            None,
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Overdue".to_string(),
+            None,
+            Some(yesterday),
+            None,
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "No due date".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        let due_today_tasks = todo_list.get_due_today_tasks();
+        assert_eq!(due_today_tasks.len(), 1);
+        assert_eq!(due_today_tasks[0].title, "Due today");
     }
 }

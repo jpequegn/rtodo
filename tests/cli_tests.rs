@@ -1161,3 +1161,169 @@ fn test_search_combined_with_sort() {
     let zebra_pos = stdout.find("Zebra API task").unwrap();
     assert!(alpha_pos < zebra_pos);
 }
+
+// Due date enhancement tests
+
+#[test]
+fn test_natural_language_date_parsing() {
+    let env = TestEnv::new();
+
+    // Test adding tasks with natural language dates
+    let output = env.run_rtodo(&["add", "Task due tomorrow", "--due", "tomorrow"])
+        .output()
+        .expect("Failed to add task");
+
+    if !output.status.success() {
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        panic!("Command failed. Stderr: {}", stderr);
+    }
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Added task"));
+    assert!(stdout.contains("Task due tomorrow"));
+
+    // Test adding task with "today"
+    let output = env.run_rtodo(&["add", "Task due today", "--due", "today"])
+        .output()
+        .expect("Failed to add task");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Added task"));
+    assert!(stdout.contains("Task due today"));
+
+    // Test adding task with "yesterday"
+    let output = env.run_rtodo(&["add", "Task due yesterday", "--due", "yesterday"])
+        .output()
+        .expect("Failed to add task");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Added task"));
+    assert!(stdout.contains("Task due yesterday"));
+}
+
+#[test]
+fn test_due_today_command() {
+    let env = TestEnv::new();
+
+    // Add tasks with different due dates
+    env.run_rtodo(&["add", "Task due today", "--due", "today"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Task due tomorrow", "--due", "tomorrow"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Task due yesterday", "--due", "yesterday"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test due-today command
+    let output = env.run_rtodo(&["due-today"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Tasks Due Today"));
+    assert!(stdout.contains("Task due today"));
+    assert!(!stdout.contains("Task due tomorrow"));
+    assert!(!stdout.contains("Task due yesterday"));
+}
+
+#[test]
+fn test_overdue_command() {
+    let env = TestEnv::new();
+
+    // Add tasks with different due dates
+    env.run_rtodo(&["add", "Task due today", "--due", "today"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Task due tomorrow", "--due", "tomorrow"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Overdue task", "--due", "yesterday"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test overdue command
+    let output = env.run_rtodo(&["overdue"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Overdue Tasks"));
+    assert!(stdout.contains("Overdue task"));
+    assert!(!stdout.contains("Task due today"));
+    assert!(!stdout.contains("Task due tomorrow"));
+}
+
+#[test]
+fn test_due_today_empty() {
+    let env = TestEnv::new();
+
+    // Add task due tomorrow (not today)
+    env.run_rtodo(&["add", "Task due tomorrow", "--due", "tomorrow"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test due-today command with no results
+    let output = env.run_rtodo(&["due-today"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("No tasks due today"));
+}
+
+#[test]
+fn test_overdue_empty() {
+    let env = TestEnv::new();
+
+    // Add task due tomorrow (not overdue)
+    env.run_rtodo(&["add", "Task due tomorrow", "--due", "tomorrow"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test overdue command with no results
+    let output = env.run_rtodo(&["overdue"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("No overdue tasks"));
+}
+
+#[test]
+fn test_due_today_with_sorting() {
+    let env = TestEnv::new();
+
+    // Add multiple tasks due today
+    env.run_rtodo(&["add", "Zebra task", "--due", "today"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Alpha task", "--due", "today"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test due-today command with title sorting
+    let output = env.run_rtodo(&["due-today", "--sort-by", "title"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Tasks Due Today (2 tasks)"));
+
+    // Verify alphabetical order
+    let alpha_pos = stdout.find("Alpha task").unwrap();
+    let zebra_pos = stdout.find("Zebra task").unwrap();
+    assert!(alpha_pos < zebra_pos);
+}
