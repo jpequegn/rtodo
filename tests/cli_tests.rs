@@ -957,3 +957,207 @@ fn test_categories_alphabetical_sorting() {
     assert!(apple_pos < middle_pos);
     assert!(middle_pos < zoo_pos);
 }
+
+// Search functionality tests
+
+#[test]
+fn test_search_basic_text() {
+    let env = TestEnv::new();
+
+    // Add test tasks
+    env.run_rtodo(&["add", "Frontend development task", "--description", "Work on React components"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Backend API development", "--description", "Build REST endpoints"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test basic text search in title
+    let output = env.run_rtodo(&["search", "Frontend"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (1 matching tasks)"));
+    assert!(stdout.contains("Frontend development task"));
+    assert!(!stdout.contains("Backend API development"));
+}
+
+#[test]
+fn test_search_case_insensitive() {
+    let env = TestEnv::new();
+
+    env.run_rtodo(&["add", "Frontend development task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test case-insensitive search
+    let output = env.run_rtodo(&["search", "FRONTEND", "-i"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (1 matching tasks)"));
+    assert!(stdout.contains("Frontend development task"));
+}
+
+#[test]
+fn test_search_in_description() {
+    let env = TestEnv::new();
+
+    env.run_rtodo(&["add", "Development task", "--description", "Work on React components"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Testing task", "--description", "Write unit tests"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test search in description
+    let output = env.run_rtodo(&["search", "React"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (1 matching tasks)"));
+    assert!(stdout.contains("Development task"));
+    assert!(!stdout.contains("Testing task"));
+}
+
+#[test]
+fn test_search_regex() {
+    let env = TestEnv::new();
+
+    env.run_rtodo(&["add", "Write documentation"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Test implementation"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Code review"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test regex search for tasks starting with "Write" or "Test"
+    let output = env.run_rtodo(&["search", "^(Write|Test)", "-x"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (2 matching tasks)"));
+    assert!(stdout.contains("Write documentation"));
+    assert!(stdout.contains("Test implementation"));
+    assert!(!stdout.contains("Code review"));
+}
+
+#[test]
+fn test_search_with_filters() {
+    let env = TestEnv::new();
+
+    // Add tasks with different properties
+    env.run_rtodo(&["add", "API development", "--category", "backend"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "API testing", "--category", "frontend"])
+        .output()
+        .expect("Failed to add task");
+
+    // Complete one task
+    env.run_rtodo(&["complete", "1"])
+        .output()
+        .expect("Failed to complete task");
+
+    // Test search with category filter
+    let output = env.run_rtodo(&["search", "API", "--category", "backend"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (1 matching tasks)"));
+    assert!(stdout.contains("API development"));
+    assert!(!stdout.contains("API testing"));
+
+    // Test search with completion status filter
+    let output = env.run_rtodo(&["search", "API", "--completed"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (1 matching tasks)"));
+    assert!(stdout.contains("API development"));
+    assert!(!stdout.contains("API testing"));
+}
+
+#[test]
+fn test_search_no_results() {
+    let env = TestEnv::new();
+
+    env.run_rtodo(&["add", "Task one"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test search with no matches
+    let output = env.run_rtodo(&["search", "nonexistent"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("No tasks found matching the search criteria"));
+}
+
+#[test]
+fn test_search_invalid_regex() {
+    let env = TestEnv::new();
+
+    env.run_rtodo(&["add", "Task one"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test invalid regex
+    let output = env.run_rtodo(&["search", "[invalid", "-x"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Invalid regex pattern"));
+}
+
+#[test]
+fn test_search_combined_with_sort() {
+    let env = TestEnv::new();
+
+    // Add tasks that match search term
+    env.run_rtodo(&["add", "Zebra API task"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Alpha API task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test search with sorting
+    let output = env.run_rtodo(&["search", "API", "--sort-by", "title"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Search Results (2 matching tasks)"));
+
+    // Verify alphabetical order
+    let alpha_pos = stdout.find("Alpha API task").unwrap();
+    let zebra_pos = stdout.find("Zebra API task").unwrap();
+    assert!(alpha_pos < zebra_pos);
+}

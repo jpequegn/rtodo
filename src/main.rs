@@ -96,6 +96,41 @@ enum Commands {
         #[arg(short = 'r', long)]
         reverse: bool,
     },
+    /// Search for todo items by text
+    Search {
+        /// Search query text
+        query: String,
+        /// Case-insensitive search
+        #[arg(short = 'i', long)]
+        case_insensitive: bool,
+        /// Use regular expression
+        #[arg(short = 'x', long)]
+        regex: bool,
+        /// Show only completed items
+        #[arg(short, long, conflicts_with = "pending")]
+        completed: bool,
+        /// Show only pending items
+        #[arg(short, long, conflicts_with = "completed")]
+        pending: bool,
+        /// Filter by category
+        #[arg(short = 'C', long)]
+        category: Option<String>,
+        /// Filter by priority
+        #[arg(short = 'P', long, value_enum)]
+        priority: Option<PriorityArg>,
+        /// Show overdue tasks only
+        #[arg(short, long)]
+        overdue: bool,
+        /// Show tasks due within a week
+        #[arg(short = 'd', long)]
+        due_soon: bool,
+        /// Sort tasks by field
+        #[arg(short = 's', long, value_enum)]
+        sort_by: Option<SortField>,
+        /// Reverse sort order (descending)
+        #[arg(short = 'r', long)]
+        reverse: bool,
+    },
     /// Mark a todo item as completed
     Complete {
         /// The ID of the todo item to complete
@@ -155,6 +190,101 @@ fn parse_date(date_str: &str) -> Result<DateTime<Local>> {
     let naive_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")?;
     let naive_datetime = naive_date.and_hms_opt(23, 59, 59).unwrap();
     Ok(Local.from_local_datetime(&naive_datetime).unwrap())
+}
+
+fn highlight_text(text: &str, query: &str, case_insensitive: bool, use_regex: bool) -> String {
+    use regex::Regex;
+    use colored::*;
+
+    if use_regex {
+        // For regex, try to find and highlight matches
+        let pattern = if case_insensitive {
+            format!("(?i){}", query)
+        } else {
+            query.to_string()
+        };
+
+        if let Ok(re) = Regex::new(&pattern) {
+            let mut result = String::new();
+            let mut last_end = 0;
+
+            for mat in re.find_iter(text) {
+                result.push_str(&text[last_end..mat.start()]);
+                result.push_str(&text[mat.start()..mat.end()].on_bright_yellow().black().to_string());
+                last_end = mat.end();
+            }
+            result.push_str(&text[last_end..]);
+            return result;
+        }
+    } else {
+        // For normal text search, highlight all occurrences
+        if case_insensitive {
+            let lower_text = text.to_lowercase();
+            let lower_query = query.to_lowercase();
+            let mut result = String::new();
+            let mut last_end = 0;
+
+            for (idx, _) in lower_text.match_indices(&lower_query) {
+                result.push_str(&text[last_end..idx]);
+                result.push_str(&text[idx..idx + query.len()].on_bright_yellow().black().to_string());
+                last_end = idx + query.len();
+            }
+            result.push_str(&text[last_end..]);
+            return result;
+        } else {
+            let mut result = String::new();
+            let mut last_end = 0;
+
+            for (idx, _) in text.match_indices(query) {
+                result.push_str(&text[last_end..idx]);
+                result.push_str(&text[idx..idx + query.len()].on_bright_yellow().black().to_string());
+                last_end = idx + query.len();
+            }
+            result.push_str(&text[last_end..]);
+            return result;
+        }
+    }
+
+    text.to_string()
+}
+
+fn print_task_with_highlight(task: &models::Task, verbose: bool, query: &str, case_insensitive: bool, use_regex: bool) {
+    let status_icon = if task.completed { "✓".green() } else { "○".yellow() };
+    let priority_color = match task.priority {
+        Priority::High => "red",
+        Priority::Medium => "yellow",
+        Priority::Low => "blue",
+    };
+
+    print!("{} [{}] ", status_icon, task.id.to_string().cyan());
+
+    // Highlight the title
+    let highlighted_title = highlight_text(&task.title, query, case_insensitive, use_regex);
+    print!("{}", highlighted_title.bold());
+
+    if let Some(category) = &task.category {
+        print!(" {}", format!("#{}", category).green());
+    }
+
+    println!(" {}", format!("[{}]", format!("{:?}", task.priority).to_lowercase()).color(priority_color));
+
+    if verbose {
+        if let Some(description) = &task.description {
+            // Highlight the description
+            let highlighted_desc = highlight_text(description, query, case_insensitive, use_regex);
+            println!("    {}", highlighted_desc.dimmed());
+        }
+        if let Some(due_date) = task.due_date {
+            let due_str = due_date.format("%Y-%m-%d").to_string();
+            if task.is_overdue() {
+                println!("    {}: {}", "Due".red(), due_str.red());
+            } else if task.is_due_soon() {
+                println!("    {}: {}", "Due".yellow(), due_str.yellow());
+            } else {
+                println!("    {}: {}", "Due".blue(), due_str.blue());
+            }
+        }
+    }
 }
 
 fn sort_tasks(mut tasks: Vec<&models::Task>, sort_by: Option<SortField>, reverse: bool) -> Vec<&models::Task> {
@@ -407,6 +537,83 @@ fn main() -> Result<()> {
                 println!("{} ({} tasks):", "Todo List".cyan().bold(), sorted_tasks.len());
                 for task in sorted_tasks {
                     print_task(task, cli.verbose);
+                }
+            }
+            Ok(())
+        }
+
+        Some(Commands::Search {
+            query,
+            case_insensitive,
+            regex,
+            completed,
+            pending,
+            category,
+            priority,
+            overdue,
+            due_soon,
+            sort_by,
+            reverse
+        }) => {
+            // First, perform the search
+            let search_results = todo_list.search_tasks(&query, case_insensitive, regex)?;
+
+            // Then apply filters
+            let filtered_tasks: Vec<&models::Task> = search_results.into_iter()
+                .filter(|task| {
+                    // Filter by completion status
+                    if completed {
+                        task.completed
+                    } else if pending {
+                        !task.completed
+                    } else {
+                        true
+                    }
+                })
+                .filter(|task| {
+                    // Filter by category
+                    if let Some(cat) = &category {
+                        task.category.as_ref().map_or(false, |c| c == cat)
+                    } else {
+                        true
+                    }
+                })
+                .filter(|task| {
+                    // Filter by priority
+                    if let Some(prio) = &priority {
+                        task.priority == (*prio).clone().into()
+                    } else {
+                        true
+                    }
+                })
+                .filter(|task| {
+                    // Filter by overdue
+                    if overdue {
+                        task.is_overdue()
+                    } else {
+                        true
+                    }
+                })
+                .filter(|task| {
+                    // Filter by due soon
+                    if due_soon {
+                        task.is_due_soon()
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+
+            // Sort the results
+            let sorted_tasks = sort_tasks(filtered_tasks, sort_by, reverse);
+
+            // Display results
+            if sorted_tasks.is_empty() {
+                println!("{}", "No tasks found matching the search criteria.".dimmed());
+            } else {
+                println!("{} ({} matching tasks):", "Search Results".cyan().bold(), sorted_tasks.len());
+                for task in sorted_tasks {
+                    print_task_with_highlight(task, cli.verbose, &query, case_insensitive, regex);
                 }
             }
             Ok(())

@@ -338,6 +338,76 @@ impl TodoList {
         Ok(count)
     }
 
+    /// Search tasks by query in title and description
+    pub fn search_tasks(&self, query: &str, case_insensitive: bool, use_regex: bool) -> Result<Vec<&Task>> {
+        use regex::Regex;
+
+        let mut matched_tasks = Vec::new();
+
+        if use_regex {
+            // Use regex search
+            let pattern = if case_insensitive {
+                format!("(?i){}", query)
+            } else {
+                query.to_string()
+            };
+
+            let re = Regex::new(&pattern)
+                .map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
+
+            for task in &self.tasks {
+                // Check title
+                if re.is_match(&task.title) {
+                    matched_tasks.push(task);
+                    continue;
+                }
+
+                // Check description if it exists
+                if let Some(desc) = &task.description {
+                    if re.is_match(desc) {
+                        matched_tasks.push(task);
+                    }
+                }
+            }
+        } else {
+            // Use regular text search
+            let search_query = if case_insensitive {
+                query.to_lowercase()
+            } else {
+                query.to_string()
+            };
+
+            for task in &self.tasks {
+                let title_to_check = if case_insensitive {
+                    task.title.to_lowercase()
+                } else {
+                    task.title.clone()
+                };
+
+                // Check title
+                if title_to_check.contains(&search_query) {
+                    matched_tasks.push(task);
+                    continue;
+                }
+
+                // Check description if it exists
+                if let Some(desc) = &task.description {
+                    let desc_to_check = if case_insensitive {
+                        desc.to_lowercase()
+                    } else {
+                        desc.clone()
+                    };
+
+                    if desc_to_check.contains(&search_query) {
+                        matched_tasks.push(task);
+                    }
+                }
+            }
+        }
+
+        Ok(matched_tasks)
+    }
+
     /// Get the total number of tasks
     pub fn len(&self) -> usize {
         self.tasks.len()
@@ -1183,5 +1253,183 @@ mod tests {
         assert_eq!(categories.get("business"), Some(&1));
         assert_eq!(categories.get("personal"), Some(&1));
         assert_eq!(categories.get("work"), None);
+    }
+
+    #[test]
+    fn test_search_tasks_basic_text() {
+        let mut todo_list = TodoList::new();
+
+        // Add test tasks
+        todo_list.add_task_with_details(
+            "Frontend development task".to_string(),
+            Some("Working on React components".to_string()),
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Backend API development".to_string(),
+            Some("Building REST endpoints".to_string()),
+            None,
+            None,
+            Priority::High,
+        );
+
+        // Test basic text search in title
+        let results = todo_list.search_tasks("Frontend", false, false).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Frontend development task");
+
+        // Test basic text search in description
+        let results = todo_list.search_tasks("React", false, false).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Frontend development task");
+
+        // Test search that matches multiple
+        let results = todo_list.search_tasks("development", false, false).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_tasks_case_insensitive() {
+        let mut todo_list = TodoList::new();
+
+        todo_list.add_task_with_details(
+            "Frontend Development Task".to_string(),
+            Some("Working on React Components".to_string()),
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Test case-insensitive search in title
+        let results = todo_list.search_tasks("frontend", true, false).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Frontend Development Task");
+
+        // Test case-insensitive search in description
+        let results = todo_list.search_tasks("react", true, false).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Test case-sensitive search should not match
+        let results = todo_list.search_tasks("frontend", false, false).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_search_tasks_regex() {
+        let mut todo_list = TodoList::new();
+
+        todo_list.add_task_with_details(
+            "Write documentation".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        todo_list.add_task_with_details(
+            "Test implementation".to_string(),
+            None,
+            None,
+            None,
+            Priority::High,
+        );
+
+        todo_list.add_task_with_details(
+            "Code review".to_string(),
+            None,
+            None,
+            None,
+            Priority::Low,
+        );
+
+        // Test regex search for tasks starting with "Write" or "Test"
+        let results = todo_list.search_tasks("^(Write|Test)", false, true).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|t| t.title == "Write documentation"));
+        assert!(results.iter().any(|t| t.title == "Test implementation"));
+        assert!(!results.iter().any(|t| t.title == "Code review"));
+    }
+
+    #[test]
+    fn test_search_tasks_regex_case_insensitive() {
+        let mut todo_list = TodoList::new();
+
+        todo_list.add_task_with_details(
+            "Frontend Task".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Test case-insensitive regex
+        let results = todo_list.search_tasks("frontend", true, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Frontend Task");
+    }
+
+    #[test]
+    fn test_search_tasks_no_results() {
+        let mut todo_list = TodoList::new();
+
+        todo_list.add_task_with_details(
+            "Task one".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Test search with no matches
+        let results = todo_list.search_tasks("nonexistent", false, false).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_search_tasks_invalid_regex() {
+        let mut todo_list = TodoList::new();
+
+        todo_list.add_task_with_details(
+            "Task one".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Test invalid regex should return error
+        let result = todo_list.search_tasks("[invalid", false, true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid regex pattern"));
+    }
+
+    #[test]
+    fn test_search_tasks_empty_description() {
+        let mut todo_list = TodoList::new();
+
+        // Task without description
+        todo_list.add_task_with_details(
+            "Task without description".to_string(),
+            None,
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Task with description
+        todo_list.add_task_with_details(
+            "Task with description".to_string(),
+            Some("Has a description".to_string()),
+            None,
+            None,
+            Priority::Medium,
+        );
+
+        // Search should work even with tasks that have no description
+        let results = todo_list.search_tasks("description", false, false).unwrap();
+        assert_eq!(results.len(), 2); // Both tasks have "description" in title
     }
 }
