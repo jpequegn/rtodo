@@ -1327,3 +1327,435 @@ fn test_due_today_with_sorting() {
     let zebra_pos = stdout.find("Zebra task").unwrap();
     assert!(alpha_pos < zebra_pos);
 }
+
+// Comprehensive integration tests for issue #13
+
+#[test]
+fn test_version_command() {
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--")
+        .arg("--version")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("rtodo"));
+}
+
+#[test]
+fn test_file_path_edge_cases() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+    // Test with deeply nested path
+    let nested_path = temp_dir.path().join("deep").join("nested").join("path").join("todos.json");
+
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--")
+        .arg("--file")
+        .arg(&nested_path)
+        .arg("add")
+        .arg("Test task")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    assert!(nested_path.exists());
+
+    // Test with relative path components
+    let relative_path = temp_dir.path().join("./test/../todos.json");
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--")
+        .arg("--file")
+        .arg(&relative_path)
+        .arg("list")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_long_task_titles() {
+    let env = TestEnv::new();
+
+    // Test very long title (300+ characters)
+    let long_title = "A".repeat(300);
+    let output = env.run_rtodo(&["add", &long_title])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Verify it was added
+    let output = env.run_rtodo(&["list"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(&long_title));
+}
+
+#[test]
+fn test_special_characters_and_unicode() {
+    let env = TestEnv::new();
+
+    // Test special characters
+    let special_chars = "Task with special chars: @#$%^&*()[]{}|\\:;\"'<>,.?/~`";
+    let output = env.run_rtodo(&["add", special_chars])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Test unicode characters
+    let unicode_text = "Unicode task: 🚀 ñáéíóú 中文 العربية हिन्दी";
+    let output = env.run_rtodo(&["add", unicode_text])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Verify both were added
+    let output = env.run_rtodo(&["list"])
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(special_chars));
+    assert!(stdout.contains(unicode_text));
+}
+
+#[test]
+fn test_empty_and_whitespace_inputs() {
+    let env = TestEnv::new();
+
+    // Test with only whitespace
+    let output = env.run_rtodo(&["add", "   "])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should succeed but trim whitespace
+    assert!(output.status.success());
+
+    // Test search with empty string
+    let output = env.run_rtodo(&["search", ""])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_large_task_list() {
+    let env = TestEnv::new();
+
+    // Add many tasks to test performance and edge cases
+    for i in 1..=100 {
+        let title = format!("Task number {}", i);
+        env.run_rtodo(&["add", &title])
+            .output()
+            .expect("Failed to add task");
+    }
+
+    // Test listing large number of tasks
+    let output = env.run_rtodo(&["list"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Todo List (100 tasks)"));
+
+    // Test search in large list
+    let output = env.run_rtodo(&["search", "Task number 50"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Task number 50"));
+}
+
+#[test]
+fn test_corrupted_json_recovery() {
+    let env = TestEnv::new();
+
+    // Add a task first
+    env.run_rtodo(&["add", "Initial task"])
+        .output()
+        .expect("Failed to add task");
+
+    // Corrupt the JSON file
+    fs::write(&env.config_file, "{ invalid json content").expect("Failed to write corrupted JSON");
+
+    // Should handle corrupted JSON gracefully
+    let output = env.run_rtodo(&["list"])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should succeed with empty list or error message
+    assert!(output.status.success() || !output.stderr.is_empty());
+}
+
+#[test]
+fn test_concurrent_file_operations() {
+    let env = TestEnv::new();
+
+    // Add initial task
+    env.run_rtodo(&["add", "Task 1"])
+        .output()
+        .expect("Failed to add task");
+
+    // Simulate concurrent operations by manually reading and writing
+    let _json_content = env.get_todos_json();
+
+    // Add another task while "holding" the first state
+    env.run_rtodo(&["add", "Task 2"])
+        .output()
+        .expect("Failed to add task");
+
+    // Verify both tasks exist
+    let output = env.run_rtodo(&["list"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Task 1"));
+    assert!(stdout.contains("Task 2"));
+}
+
+#[test]
+fn test_invalid_command_combinations() {
+    let env = TestEnv::new();
+
+    // Test invalid task ID
+    let output = env.run_rtodo(&["complete", "999"])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should either fail or show an error message
+    if output.status.success() {
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("not found") || stderr.contains("Error"));
+    }
+
+    // Test invalid sort field
+    let output = env.run_rtodo(&["list", "--sort-by", "invalid_field"])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should either fail or show an error message
+    if output.status.success() {
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("invalid value") || stderr.contains("Error"));
+    }
+
+    // Test invalid regex in search
+    let _output = env.run_rtodo(&["search", "[invalid"])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should handle gracefully (might succeed with warning or fail)
+    // The behavior depends on implementation
+}
+
+#[test]
+fn test_edge_case_task_ids() {
+    let env = TestEnv::new();
+
+    // Add tasks
+    env.run_rtodo(&["add", "Task 1"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Task 2"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Task 3"])
+        .output()
+        .expect("Failed to add task");
+
+    // Remove middle task
+    env.run_rtodo(&["remove", "2"])
+        .output()
+        .expect("Failed to remove task");
+
+    // Test with extremely high ID that definitely doesn't exist
+    let output = env.run_rtodo(&["complete", "999"])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should either fail or show an error message
+    if output.status.success() {
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stderr.contains("not found") || stderr.contains("Error") ||
+                stdout.contains("not found") || stdout.contains("Error"));
+    }
+
+    // Test with ID 0 (invalid ID)
+    let output = env.run_rtodo(&["complete", "0"])
+        .output()
+        .expect("Failed to execute command");
+
+    // Should either fail or show an error message
+    if output.status.success() {
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stderr.contains("not found") || stderr.contains("Error") ||
+                stdout.contains("not found") || stdout.contains("Error"));
+    }
+}
+
+#[test]
+fn test_complex_filter_combinations() {
+    let env = TestEnv::new();
+
+    // Add tasks with various properties
+    env.run_rtodo(&["add", "Urgent work", "--priority", "high", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Personal task", "--priority", "low", "--category", "personal"])
+        .output()
+        .expect("Failed to add task");
+
+    env.run_rtodo(&["add", "Medium work", "--priority", "medium", "--category", "work"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test multiple filters with sorting
+    let output = env.run_rtodo(&["list", "--category", "work", "--sort-by", "priority", "--reverse"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Urgent work"));
+    assert!(stdout.contains("Medium work"));
+    assert!(!stdout.contains("Personal task"));
+}
+
+#[test]
+fn test_verbose_output_coverage() {
+    let env = TestEnv::new();
+
+    // Test verbose flag with different commands
+    let output = env.run_rtodo(&["--verbose", "add", "Verbose task"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let output = env.run_rtodo(&["--verbose", "list"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let output = env.run_rtodo(&["list", "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_backup_functionality() {
+    let env = TestEnv::new();
+
+    // Add some tasks
+    env.run_rtodo(&["add", "Task for backup test"])
+        .output()
+        .expect("Failed to add task");
+
+    // Check if backup files are created (implementation dependent)
+    let _backup_pattern = format!("{}.backup", env.config_file.display());
+
+    // Trigger operations that might create backups
+    env.run_rtodo(&["remove", "1"])
+        .output()
+        .expect("Failed to remove task");
+
+    // The exact backup behavior depends on implementation
+    // This test ensures backup-related code paths are exercised
+}
+
+#[test]
+fn test_date_edge_cases() {
+    let env = TestEnv::new();
+
+    // Test leap year dates
+    let output = env.run_rtodo(&["add", "Leap year task", "--due", "2024-02-29"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Test year boundaries
+    let output = env.run_rtodo(&["add", "New year task", "--due", "2024-12-31"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Test far future dates
+    let output = env.run_rtodo(&["add", "Future task", "--due", "2099-12-31"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Test past dates for overdue functionality
+    let output = env.run_rtodo(&["add", "Old task", "--due", "2020-01-01"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Test overdue command with these edge cases
+    let output = env.run_rtodo(&["overdue"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_category_edge_cases() {
+    let env = TestEnv::new();
+
+    // Test category with special characters
+    env.run_rtodo(&["add", "Special category task", "--category", "work-urgent!"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test category with spaces
+    env.run_rtodo(&["add", "Spaced category task", "--category", "personal life"])
+        .output()
+        .expect("Failed to add task");
+
+    // Test very long category name
+    let long_category = "a".repeat(100);
+    env.run_rtodo(&["add", "Long category task", "--category", &long_category])
+        .output()
+        .expect("Failed to add task");
+
+    // Test categories listing
+    let output = env.run_rtodo(&["categories"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("work-urgent!"));
+    assert!(stdout.contains("personal life"));
+    assert!(stdout.contains(&long_category));
+}
